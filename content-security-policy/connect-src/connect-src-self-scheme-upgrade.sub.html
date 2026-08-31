@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta http-equiv="Content-Security-Policy" content="connect-src 'self'; script-src 'self' 'unsafe-inline';">
+    <title>connect-src 'self' and a same-host https URL</title>
+    <script src="/resources/testharness.js"></script>
+    <script src="/resources/testharnessreport.js"></script>
+    <script src="/content-security-policy/support/testharness-helper.js"></script>
+</head>
+<body>
+<div id="log"></div>
+<script>
+// https://w3c.github.io/webappsec-csp/#match-url-to-source-expression step 4.2:
+// 'self' matches when the hosts are equal, the url's scheme is "https", and the
+// origin's port and the url's port "are either the same or the default ports for
+// their respective schemes".
+//
+// The "default ports" half of that clause is only exercised when both ports are
+// their scheme's default. Under the standard WPT config they are not -- http is
+// 8000 and https is 8443 -- so 'self' must not match. Deployments that serve on
+// the default ports do exercise it (wpt.live serves http on 80 and https on 443)
+// and there 'self' must match. Derive the expectation from the ports actually in
+// use, so this test is correct under either configuration.
+const DEFAULT_PORT = {"http:": 80, "https:": 443};
+
+const documentPort = location.port === ""
+    ? DEFAULT_PORT[location.protocol]
+    : Number(location.port);
+const targetPort = {{ports[https][0]}};
+const targetUrl = "https://{{host}}:{{ports[https][0]}}" +
+    "/content-security-policy/support/resource.py?self-scheme-upgrade";
+
+const portsAreTheSame = documentPort === targetPort;
+const portsAreDefaults = documentPort === DEFAULT_PORT[location.protocol] &&
+                         targetPort === DEFAULT_PORT["https:"];
+const shouldMatch = portsAreTheSame || portsAreDefaults;
+
+promise_test(t => {
+  if (shouldMatch) {
+    assert_no_csp_event_for_url(t, targetUrl);
+    return fetch(targetUrl)
+        .then(t.step_func(r => assert_equals(r.status, 200)));
+  }
+  return Promise.all([
+    waitUntilCSPEventForURL(t, targetUrl),
+    fetch(targetUrl)
+        .then(t.step_func(() => assert_unreached("fetch() should have been blocked")))
+        .catch(t.step_func(e => assert_true(e instanceof TypeError)))
+  ]);
+}, "connect-src 'self' matches a same-host https URL only when the ports are " +
+   "the same or both their schemes' defaults");
+</script>
+</body>
+</html>
